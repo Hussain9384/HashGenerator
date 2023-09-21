@@ -1,31 +1,64 @@
-﻿using HashGenerator.Interfaces;
+﻿using CsvHelper;
+using CsvHelper.Configuration;
+using HashGenerator.Interfaces;
+using HashGenerator.Models;
+using System.Formats.Asn1;
+using System.Globalization;
 
 namespace HashGenerator.Services
 {
     internal class HashingService : IHashingService
     {
         private readonly IFileOperator _fileOperator;
+        private readonly IHashGenerator _hashGenerator;
 
-        public HashingService(IFileOperator fileOperator)
+        public HashingService(IFileOperator fileOperator, IHashGenerator hashGenerator)
         {
             _fileOperator = fileOperator;
+            _hashGenerator = hashGenerator;
         }
 
         public async Task StartHashing(string[] args)
         {
-            if (args.Length != 4 ) { throw new Exception("Missing Inputs, Unable to proceed"); };
+            //if (args.Length != 1) { throw new Exception("Missing Inputs, Unable to proceed"); };
 
-            string filePath = args[0];
-            string sheetName = args[1];
-            int.TryParse(args[2], out int batchSize);
-            string targetFilePath = args[3];
+            //string folderPath = args[0];
 
+            var folderPath = "F:\\Temp";
 
-            Console.WriteLine($"filePath: {filePath}, sheetName : {sheetName}, batchSize : {batchSize}");
+            var inputFolderPath = Path.Combine(folderPath, "Input");
+            if (File.Exists(inputFolderPath)) { }
+            Console.WriteLine($"input filePath: {inputFolderPath} exist");
 
-            if (_fileOperator.IsFileAndWorkSheetExist(filePath, sheetName)) { 
-                await _fileOperator.ReadExcelLinesAsync(filePath, sheetName, batchSize, targetFilePath);
+            var outputFolderpath = Path.Combine(folderPath, "Output");
+            if (File.Exists(outputFolderpath))
+            Console.WriteLine($"output filePath: {outputFolderpath} exist");
+
+            string[] fileNamesList = Directory.GetFiles(inputFolderPath);
+
+            if (fileNamesList.Length == 0)
+            {
+                await Console.Out.WriteLineAsync("No files found to process");
+                return;
             }
+
+            var cores = Environment.ProcessorCount;
+
+            Console.WriteLine($"Using {cores} Cores to process hashing");
+
+            if (!fileNamesList.Any()) Console.WriteLine("No files found to process");
+
+            var filesWithIndex = fileNamesList.Select((x, i) => new { fileName = x, index = i + 1 });
+
+            await Parallel.ForEachAsync(filesWithIndex, new ParallelOptions()
+            {
+                MaxDegreeOfParallelism = cores,
+            }, async (input, token) =>
+            {
+                var res = await _fileOperator.ReadDataFromCsvAsync(inputFolderPath, outputFolderpath, input.fileName, token);
+
+                await Console.Out.WriteLineAsync($"File_Process_Status_{input.fileName}_{res}");
+            });
         }
     }
 }

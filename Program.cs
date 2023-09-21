@@ -21,11 +21,12 @@ var hashingService = app.Services.GetRequiredService<IHashingService>();
 
 Console.WriteLine("Starting Hashing ...");
 
-
-//dotnet run F:\Temp\Book1.xlsx sheet1 100 F:\Temp\Bk.csv
+//dotnet run F:\Temp\Input 
 
 Task.Run(async () => {
+
     await hashingService.StartHashing(args);
+
 }).Wait();
 
 Console.WriteLine("Hashing Done...");

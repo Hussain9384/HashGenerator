@@ -1,8 +1,13 @@
-﻿using ClosedXML.Excel;
-using DocumentFormat.OpenXml.Spreadsheet;
+﻿using CsvHelper.Configuration;
+using CsvHelper;
 using HashGenerator.Interfaces;
+using System.Diagnostics;
 using System.Globalization;
 using System.Text;
+using HashGenerator.Models;
+using System.Linq;
+using System.Collections.Generic;
+using System.Data;
 
 namespace HashGenerator.Processors
 {
@@ -14,108 +19,75 @@ namespace HashGenerator.Processors
         {
             _hashGenerator = hashGenerator;
         }
-        public bool IsFileAndWorkSheetExist(string filePath, string sheetName)
+
+        public IEnumerable<string> GetValidFiles(string folderPath, string[] fileNames)
         {
-            if (File.Exists(filePath))
+            Console.WriteLine($"Executing_{nameof(GetValidFiles)}");
+
+            var fileExistResult = fileNames.Where(s => string.IsNullOrWhiteSpace(s) && File.Exists(folderPath));
+
+            if (fileExistResult.Count() != fileNames.Count()) {
+                Console.WriteLine($"There are few missing files : { string.Join(",",fileNames.Except(fileExistResult)) }");
+            }
+
+            return fileExistResult;
+        }
+
+        public async Task<bool> ReadDataFromCsvAsync(string inputFolderName, string outputFolderName, string fileName, CancellationToken cancellationToken)
+        {
+            Console.WriteLine($"Executing_{nameof(ReadDataFromCsvAsync)}");
+
+            bool isjobDone = false;
+
+            List<Customer> records;
+
+            try
             {
-                Console.WriteLine($"File exist in the path : '{filePath}'");
-
-                using (var workbook = new XLWorkbook(filePath))
+                string csvFilePath = Path.Combine(inputFolderName, fileName);
+                using (var reader = new StreamReader(csvFilePath))
+                using (var csv = new CsvReader(reader, new CsvConfiguration(CultureInfo.InvariantCulture)))
                 {
-                    try
-                    {
-                        IXLWorksheet worksheet = workbook.Worksheet(sheetName);
+                    records = csv.GetRecords<Customer>().ToList();
 
-                        if (worksheet != null)
-                        {
-                            Console.WriteLine($"Sheet '{sheetName}' exists in the workbook.");
-                            return true;
-                        }
-                        else
-                        {
-                            Console.WriteLine($"Sheet '{sheetName}' does not exist in the workbook.");
-                        }
-                    }
-                    catch (Exception ex)
+                    records.ForEach(item =>
                     {
-                        Console.WriteLine($"exception occurred during the check {nameof(IsFileAndWorkSheetExist)}, ex: {ex.Message} , inner_ex: {ex.InnerException?.Message}");
-                    }
+                        item.EmailAddress = _hashGenerator.GenerateHash(item.EmailAddress);
+                    });
+
+                     isjobDone = await WriteCsvAsync(outputFolderName, fileName, records, cancellationToken);
                 }
             }
-            else
+            catch (Exception ex)
             {
-                Console.WriteLine($"File doesn't exist in the path : '{filePath}'");
-            }
-            return false;
-        }
-        public double GetCount(string filePath, string sheetName)
-        {
-            double rowCount = 0;
-
-            using (var workbook = new XLWorkbook(filePath))
-            {
-                IXLWorksheet worksheet = workbook.Worksheet(sheetName);
-
-                rowCount = worksheet.RowsUsed().Count();
-
-                Console.WriteLine($"Row count: {rowCount}");
+                Console.WriteLine("An error occurred: " + ex.Message);
             }
 
-            return rowCount;
+            return isjobDone;
         }
 
-        public async Task ReadExcelLinesAsync(string filePath, string sheetName, int batchSize, string targetFilePath)
+        public async Task<bool> WriteCsvAsync(string folderName, string fileName, IEnumerable<Customer> records, CancellationToken cancellationToken)
         {
-            Console.WriteLine($"Started {nameof(ReadExcelLinesAsync)}");
+            Console.WriteLine($"Executing_{nameof(ReadDataFromCsvAsync)}");
 
-            await Task.Run(() =>
+            bool isjobDone = false;
+
+            try
             {
-                using (var workbook = new XLWorkbook(filePath))
+                var outputFile = Path.GetFileName(fileName).Replace("Input", "Output");
+                using (var writer = new StreamWriter(Path.Combine(folderName, outputFile)))
+                using (var csv = new CsvWriter(writer, new CsvConfiguration(CultureInfo.InvariantCulture)))
                 {
-                    IXLWorksheet worksheet = workbook.Worksheet(sheetName);
-
-                    var rows = worksheet.RowsUsed().Skip(1);
-
-                    int processedCount = 0;
-
-                    Console.WriteLine($"Rows_Count : {rows.Count()}");
-
-                    while (processedCount < rows.Count())
-                    {
-                        var batch = rows.Skip(processedCount).Take(batchSize);
-
-                        foreach (var row in batch)
-                        {
-                            using (StreamWriter writer = File.AppendText(targetFilePath))
-                            {
-                                StringBuilder sb = new StringBuilder();
-
-                                foreach (var cell in row.Cells())
-                                {
-                                    var hash = CalculateHashIfNotEmpty(cell);
-
-                                    sb.Append( cell.Value + "," );
-                                    sb.Append(hash + ",");
-                                }
-
-                                writer.WriteLine( sb.ToString() );
-                            }
-                        }
-
-                        processedCount += batch.Count();
-                    }
+                    await csv.WriteRecordsAsync(records);
                 }
-            });
-        }
 
-        private string CalculateHashIfNotEmpty(IXLCell xLCell) {
-
-            if (xLCell.TryGetValue(out string cellValue) && !string.IsNullOrEmpty(cellValue))
+                isjobDone = true;   
+            }
+            catch (Exception ex)
             {
-                return _hashGenerator.GenerateHash(cellValue);
+                Console.WriteLine("An error occurred while writing the CSV file: " + ex.Message);
             }
 
-            return string.Empty;
+            return isjobDone;
         }
     }
 }
